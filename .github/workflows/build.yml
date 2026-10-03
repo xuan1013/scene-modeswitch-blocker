@@ -20,12 +20,19 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Check Android SDK
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          command -v sdkmanager
+          sdkmanager --version
 
       - name: Install Android 36 SDK
         run: |
-          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "platform-tools"
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -34,22 +41,45 @@ jobs:
 
       - name: Extract source package
         run: |
-          mkdir extracted
+          mkdir -p extracted
           unzip -q Scene_ModeSwitch_Blocker_LSPosed_V0.1_src_ready.zip -d extracted
-          ls -la extracted/Scene_ModeSwitch_Blocker_LSPosed_V0.1_src
+
+          echo "=== Extracted files ==="
+          find extracted -maxdepth 3 -type f | head -100
+
+          PROJECT_DIR="$(dirname "$(find extracted -name settings.gradle -print -quit)")"
+
+          if [ -z "$PROJECT_DIR" ] || [ "$PROJECT_DIR" = "." ]; then
+            echo "Cannot find settings.gradle"
+            exit 1
+          fi
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Project directory: $PROJECT_DIR"
 
       - name: Build APK
-        working-directory: extracted/Scene_ModeSwitch_Blocker_LSPosed_V0.1_src
         run: |
+          cd "$PROJECT_DIR"
           gradle :app:assembleDebug --no-daemon --stacktrace
 
       - name: Prepare artifact
         run: |
           mkdir -p dist
-          cp extracted/Scene_ModeSwitch_Blocker_LSPosed_V0.1_src/app/build/outputs/apk/debug/app-debug.apk \
-             dist/Scene_ModeSwitch_Blocker_LSPosed_V0.1.apk
+
+          APK="$(find "$PROJECT_DIR" \
+            -path '*/app/build/outputs/apk/debug/app-debug.apk' \
+            -print -quit)"
+
+          if [ -z "$APK" ]; then
+            echo "APK not found"
+            exit 1
+          fi
+
+          cp "$APK" dist/Scene_ModeSwitch_Blocker_LSPosed_V0.1.apk
+
           cd dist
-          sha256sum Scene_ModeSwitch_Blocker_LSPosed_V0.1.apk > SHA256SUMS.txt
+          sha256sum Scene_ModeSwitch_Blocker_LSPosed_V0.1.apk \
+            > SHA256SUMS.txt
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
